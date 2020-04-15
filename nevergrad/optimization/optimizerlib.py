@@ -69,11 +69,13 @@ class _OnePlusOne(base.Optimizer):
         self.mutation = mutation
         self.crossover = crossover
 
-    def _internal_ask(self) -> ArrayLike:
+    def _internal_ask_candidate(self) -> p.Parameter:
         # pylint: disable=too-many-return-statements, too-many-branches
         noise_handling = self.noise_handling
         if not self._num_ask:
-            return np.zeros(self.dimension)  # type: ignore
+            out = self.parametrization.spawn_child()
+            out._meta["sigma"] = self._sigma
+            return out
         # for noisy version
         if noise_handling is not None:
             limit = (0.05 if isinstance(noise_handling, str) else noise_handling[1]) * len(self.archive) ** 3
@@ -81,33 +83,41 @@ class _OnePlusOne(base.Optimizer):
             if self._num_ask <= limit:
                 if strategy in ["cubic", "random"]:
                     idx = self._rng.choice(len(self.archive))
-                    return np.frombuffer(list(self.archive.bytesdict.keys())[idx])  # type: ignore
+                    return list(self.archive.values())[idx].parameter.spawn_child()  # type: ignore
                 elif strategy == "optimistic":
-                    return self.current_bests["optimistic"].x
+                    return self.current_bests["optimistic"].parameter.spawn_child()
         # crossover
         mutator = mutations.Mutator(self._rng)
+        pessimistic = self.current_bests["pessimistic"].parameter.spawn_child()
+        ref = self.parametrization
         if self.crossover and self._num_ask % 2 == 1 and len(self.archive) > 2:
-            return mutator.crossover(self.current_bests["pessimistic"].x, mutator.get_roulette(self.archive, num=2))
+            data = mutator.crossover(pessimistic.get_standardized_data(reference=ref),
+                                     mutator.get_roulette(self.archive, num=2))
+            return pessimistic.set_standardized_data(data, reference=ref)
         # mutating
         mutation = self.mutation
-        pessimistic = self.current_bests["pessimistic"].x
-        if mutation == "gaussian":  # standard case
-            return pessimistic + self._sigma * self._rng.normal(0, 1, self.dimension)  # type: ignore
-        elif mutation == "cauchy":
-            return pessimistic + self._sigma * self._rng.standard_cauchy(self.dimension)  # type: ignore
-        elif mutation == "crossover":
-            if self._num_ask % 2 == 0 or len(self.archive) < 3:
-                return mutator.portfolio_discrete_mutation(pessimistic)
-            else:
-                return mutator.crossover(pessimistic, mutator.get_roulette(self.archive, num=2))
+        if mutation in ("gaussian", "cauchy"):  # standard case
+            step = (self._rng.normal(0, 1, self.dimension) if mutation == "gaussian" else
+                    self._rng.standard_cauchy(self.dimension))
+            out = pessimistic.set_standardized_data(self._sigma * step)
+            out._meta["sigma"] = self._sigma
+            return out
         else:
-            func: Callable[[ArrayLike], ArrayLike] = {  # type: ignore
-                "discrete": mutator.discrete_mutation,
-                "fastga": mutator.doerr_discrete_mutation,
-                "doublefastga": mutator.doubledoerr_discrete_mutation,
-                "portfolio": mutator.portfolio_discrete_mutation,
-            }[mutation]
-            return func(self.current_bests["pessimistic"].x)
+            pessimistic_data = pessimistic.get_standardized_data(reference=ref)
+            if mutation == "crossover":
+                if self._num_ask % 2 == 0 or len(self.archive) < 3:
+                    data = mutator.portfolio_discrete_mutation(pessimistic_data)
+                else:
+                    data = mutator.crossover(pessimistic_data, mutator.get_roulette(self.archive, num=2))
+            else:
+                func: Callable[[ArrayLike], ArrayLike] = {  # type: ignore
+                    "discrete": mutator.discrete_mutation,
+                    "fastga": mutator.doerr_discrete_mutation,
+                    "doublefastga": mutator.doubledoerr_discrete_mutation,
+                    "portfolio": mutator.portfolio_discrete_mutation,
+                }[mutation]
+                data = func(pessimistic_data)
+            return pessimistic.set_standardized_data(data, reference=ref)
 
     def _internal_tell(self, x: ArrayLike, value: float) -> None:
         # only used for cauchy and gaussian
@@ -179,9 +189,9 @@ RecombiningPortfolioOptimisticNoisyDiscreteOnePlusOne = ParametrizedOnePlusOne(
 ).set_name("RecombiningPortfolioOptimisticNoisyDiscreteOnePlusOne", register=True)
 
 
+# pylint: too-many-arguments, too-many-instance-attributes
 class _CMA(base.Optimizer):
 
-    # pylint: too-many-arguments
     def __init__(
             self,
             parametrization: IntOrParameter,
@@ -240,12 +250,13 @@ class _CMA(base.Optimizer):
                 self.listx = []
                 self.listy = []
 
-    def _internal_provide_recommendation(self) -> ArrayLike:
+    def _internal_provide_recommendation(self) -> np.ndarray:
+        pessimistic = self.current_bests["pessimistic"].parameter.get_standardized_data(reference=self.parametrization)
         if self._es is None:
-            raise RuntimeError("Either ask or tell method should have been called before")
-        cma_best = self.es.best_x if self._fcmaes else self.es.result.xbest
+            return pessimistic
+        cma_best: tp.Optional[np.ndarray] = self.es.best_x if self._fcmaes else self.es.result.xbest
         if cma_best is None:
-            return self.current_bests["pessimistic"].x
+            return pessimistic
         return cma_best
 
 
@@ -407,11 +418,11 @@ class _TBPSA(base.Optimizer):
     # pylint: disable=too-many-instance-attributes
 
     def __init__(self,
-            parametrization: IntOrParameter,
-            budget: Optional[int] = None,
-            num_workers: int = 1,
-            naive: bool = True
-            ) -> None:
+                 parametrization: IntOrParameter,
+                 budget: Optional[int] = None,
+                 num_workers: int = 1,
+                 naive: bool = True
+                 ) -> None:
         super().__init__(parametrization, budget=budget, num_workers=num_workers)
         self.sigma = 1
         self.naive = naive
@@ -466,8 +477,16 @@ class ParametrizedTBPSA(base.ConfiguredOptimizer):
     Parameters
     ----------
     naive: bool
-        set to False for noisy problem, so that the best points will be an 
+        set to False for noisy problem, so that the best points will be an
         average of the final population.
+
+    Note
+    ----
+    Derived from:
+    Hellwig, Michael & Beyer, Hans-Georg. (2016).
+    Evolution under Strong Noise: A Self-Adaptive Evolution Strategy
+    Reaches the Lower Performance Bound -- the pcCMSA-ES.
+    https://homepages.fhv.at/hgb/New-Papers/PPSN16_HB16.pdf
     """
 
     # pylint: disable=unused-argument
@@ -478,8 +497,10 @@ class ParametrizedTBPSA(base.ConfiguredOptimizer):
     ) -> None:
         super().__init__(_TBPSA, locals())
 
+
 TBPSA = ParametrizedTBPSA(naive=False).set_name("TBPSA", register=True)
 NaiveTBPSA = ParametrizedTBPSA().set_name("NaiveTBPSA", register=True)
+
 
 @registry.register
 class NoisyBandit(base.Optimizer):
@@ -706,6 +727,9 @@ class SplitOptimizer(base.Optimizer):
 
     num_optims: number of optimizers
     num_vars: number of variable per optimizer.
+    progressive: True if we want to progressively add optimizers during the optimization run.
+
+    If progressive = True, the optimizer is forced at OptimisticNoisyOnePlusOne.
 
     E.g. for 5 optimizers, each of them working on 2 variables, we can use:
     opt = SplitOptimizer(parametrization=10, num_workers=3, num_optims=5, num_vars=[2, 2, 2, 2, 2])
@@ -728,7 +752,8 @@ class SplitOptimizer(base.Optimizer):
             num_optims: tp.Optional[int] = None,
             num_vars: Optional[List[int]] = None,
             multivariate_optimizer: base.ConfiguredOptimizer = CMA,
-            monovariate_optimizer: base.ConfiguredOptimizer = RandomSearch
+            monovariate_optimizer: base.ConfiguredOptimizer = RandomSearch,
+            progressive: bool = False,
     ) -> None:
         super().__init__(parametrization, budget=budget, num_workers=num_workers)
         if num_vars is not None:
@@ -744,6 +769,7 @@ class SplitOptimizer(base.Optimizer):
         if num_optims > self.dimension:
             num_optims = self.dimension
         self.num_optims = num_optims
+        self.progressive = progressive
         self.optims: List[Any] = []
         self.num_vars: List[Any] = num_vars if num_vars else []
         self.parametrizations: List[Any] = []
@@ -753,6 +779,8 @@ class SplitOptimizer(base.Optimizer):
 
             assert self.num_vars[i] >= 1, "At least one variable per optimizer."
             self.parametrizations += [p.Array(shape=(self.num_vars[i],))]
+            for param in self.parametrizations:
+                param.random_state = self.parametrization.random_state
             assert len(self.optims) == i
             if self.num_vars[i] > 1:
                 self.optims += [multivariate_optimizer(self.parametrizations[i], budget, num_workers)]  # noqa: F405
@@ -765,6 +793,11 @@ class SplitOptimizer(base.Optimizer):
     def _internal_ask_candidate(self) -> p.Parameter:
         data: List[Any] = []
         for i in range(self.num_optims):
+            if self.progressive:
+                assert self.budget is not None
+                if i > 0 and i / self.num_optims > np.sqrt(2.0 * self._num_ask / self.budget):
+                    data += [0.] * self.num_vars[i]
+                    continue
             opt = self.optims[i]
             data += list(opt.ask().get_standardized_data(reference=opt.parametrization))
         assert len(data) == self.dimension
@@ -797,6 +830,8 @@ class ConfSplitOptimizer(base.ConfiguredOptimizer):
         number of optimizers
     num_vars: optional list of int
         number of variable per optimizer.
+    progressive: optional bool
+        whether we progressively add optimizers.
     """
 
     # pylint: disable=unused-argument
@@ -806,7 +841,8 @@ class ConfSplitOptimizer(base.ConfiguredOptimizer):
         num_optims: int = 2,
         num_vars: tp.Optional[tp.List[int]] = None,
         multivariate_optimizer: base.ConfiguredOptimizer = CMA,
-        monovariate_optimizer: base.ConfiguredOptimizer = RandomSearch
+        monovariate_optimizer: base.ConfiguredOptimizer = RandomSearch,
+        progressive: bool = False
     ) -> None:
         super().__init__(SplitOptimizer, locals())
 
@@ -1201,7 +1237,10 @@ class _BO(base.Optimizer):
         self._fake_function._registered.clear()
 
     def _internal_provide_recommendation(self) -> ArrayLike:
-        return self._transform.backward(np.array([self.bo.max["params"][f"x{i}"] for i in range(self.dimension)]))
+        if self.archive:
+            return self._transform.backward(np.array([self.bo.max["params"][f"x{i}"] for i in range(self.dimension)]))
+        else:
+            return super()._internal_provide_recommendation()
 
 
 class ParametrizedBO(base.ConfiguredOptimizer):
@@ -1492,24 +1531,31 @@ class _EMNA(base.Optimizer):
             budget: Optional[int] = None,
             num_workers: int = 1,
             isotropic: bool = True,
-            naive: bool = True
+            naive: bool = True,
+            population_size_adaptation: bool = False
     ) -> None:
         super().__init__(parametrization, budget=budget, num_workers=num_workers)
         self.isotropic: bool = isotropic
         self.naive: bool = naive
+        self.population_size_adaptation = population_size_adaptation
+        self.min_coef_parallel_context: int = 8
+        # Sigma initialization
         self.sigma: tp.Union[float, np.ndarray]
         if self.isotropic:
             self.sigma = 1.0
         else:
             self.sigma = np.ones(self.dimension)
-        self.mu = max(16, self.dimension)
-        self.llambda = 4 * self.mu
-        if budget is not None and self.llambda > budget:
-            self.llambda = budget
-            self.mu = self.llambda // 4
-            warnings.warn("Budget may be too small in front of the dimension for EMNA")
-        if num_workers is not None:
-            self.llambda = max(self.llambda, num_workers)
+        # population size and parent size initializations
+        dim = self.dimension
+        self.popsize = _PopulationSizeController(llambda=4 * dim, mu=dim, dimension=dim, num_workers=num_workers)
+        if not self.population_size_adaptation:
+            self.popsize.mu = max(16, self.dimension)
+            self.popsize.llambda = 4 * self.popsize.mu
+            self.popsize.llambda = max(self.popsize.llambda, num_workers)
+            if budget is not None and self.popsize.llambda > budget:
+                self.popsize.llambda = budget
+                self.popsize.mu = self.popsize.llambda // 4
+                warnings.warn("Budget may be too small in front of the dimension for EMNA", base.InefficientSettingsWarning)
         self.current_center: np.ndarray = np.zeros(self.dimension)
         # population
         self.parents: List[p.Parameter] = [self.parametrization]
@@ -1522,35 +1568,47 @@ class _EMNA(base.Optimizer):
             return self.current_center
 
     def _internal_ask_candidate(self) -> p.Parameter:
-        individual = self.current_center + self.sigma * self._rng.normal(0, 1, self.dimension)
+        sigma_tmp = self.sigma
+        if self.population_size_adaptation and self.popsize.llambda < self.min_coef_parallel_context * self.dimension:
+            sigma_tmp = self.sigma * np.exp(self._rng.normal(0, 1) / np.sqrt(self.dimension))
+        individual = self.current_center + sigma_tmp * self._rng.normal(0, 1, self.dimension)
         parent = self.parents[self.num_ask % len(self.parents)]
         candidate = parent.spawn_child().set_standardized_data(individual, reference=self.parametrization)
         if parent is self.parametrization:
             candidate.heritage["lineage"] = candidate.uid
-        candidate._meta["sigma"] = self.sigma
+        candidate._meta["sigma"] = sigma_tmp
         return candidate
 
     def _internal_tell_candidate(self, candidate: p.Parameter, value: float) -> None:
         candidate._meta["loss"] = value
+        if self.population_size_adaptation:
+            self.popsize.add_value(value)
         self.children.append(candidate)
-        if len(self.children) >= self.llambda:
+        if len(self.children) >= self.popsize.llambda:
             # Sorting the population.
             self.children.sort(key=lambda c: c._meta["loss"])
             # Computing the new parent.
-            self.parents = self.children[: self.mu]
+            self.parents = self.children[: self.popsize.mu]
             self.children = []
             self.current_center = sum(c.get_standardized_data(reference=self.parametrization)  # type: ignore
-                                      for c in self.parents) / self.mu
-            # EMNA update
-            stdd = [(self.parents[i].get_standardized_data(reference=self.parametrization) - self.current_center)**2
-                    for i in range(self.mu)]
-            if self.isotropic:
-                self.sigma = np.sqrt(sum(stdd) / (self.mu * self.dimension))
+                                      for c in self.parents) / self.popsize.mu
+            if self.population_size_adaptation:
+                if self.popsize.llambda < self.min_coef_parallel_context * self.dimension:  # Population size not large enough for emna
+                    self.sigma = np.exp(np.sum(np.log([c._meta["sigma"] for c in self.parents]),
+                                               axis=0 if self.isotropic else None) / self.popsize.mu)
+                else:
+                    stdd = [(self.parents[i].get_standardized_data(reference=self.parametrization) -
+                             self.current_center)**2 for i in range(self.popsize.mu)]
+                    self.sigma = np.sqrt(np.sum(stdd) / (self.popsize.mu * (self.dimension if self.isotropic else 1)))
             else:
-                self.sigma = np.sqrt(np.sum(stdd, axis=0) / (self.mu))
+                # EMNA update
+                stdd = [(self.parents[i].get_standardized_data(reference=self.parametrization) -
+                         self.current_center)**2 for i in range(self.popsize.mu)]
+                self.sigma = np.sqrt(np.sum(stdd, axis=0 if self.isotropic else None) /
+                                     (self.popsize.mu * (self.dimension if self.isotropic else 1)))
 
             if self.num_workers / self.dimension > 32:  # faster decrease of sigma if large parallel context
-                imp = max(1, (np.log(self.llambda) / 2)**(1 / self.dimension))
+                imp = max(1, (np.log(self.popsize.llambda) / 2)**(1 / self.dimension))
                 self.sigma /= imp
 
     def _internal_tell_not_asked(self, candidate: p.Parameter, value: float) -> None:
@@ -1578,7 +1636,8 @@ class EMNA(base.ConfiguredOptimizer):
         self,
         *,
         isotropic: bool = True,
-        naive: bool = True
+        naive: bool = True,
+        population_size_adaptation: bool = False
     ) -> None:
         super().__init__(_EMNA, locals())
 
