@@ -155,6 +155,25 @@ def largedoe(seed: tp.Optional[int] = None) -> tp.Iterator[Experiment]:
 
 
 @registry.register
+def my_bench(seed: tp.Optional[int] = None) -> tp.Iterator[Experiment]:
+    """Parallel optimization on 3 classical objective functions."""
+    seedg = create_seed_generator(seed)
+    names = ["sphere"]
+    optims = [x for x, y in ng.optimizers.registry.items() if "NaiveSimpleSA" in x]
+    # optims += ["NaiveIsoEMNA", "CMA"]
+    functions = [
+        ArtificialFunction(name, block_dimension=bd, useless_variables=bd * uv_factor)
+        for name in names
+        for bd in [3, 10]
+        for uv_factor in [0]
+    ]
+    for func in functions:
+        for optim in optims:
+            for budget in [30, 100, 900]:
+                yield Experiment(func, optim, budget=budget, num_workers=1, seed=next(seedg))
+
+
+@registry.register
 def parallel(seed: tp.Optional[int] = None) -> tp.Iterator[Experiment]:
     """Parallel optimization on 3 classical objective functions."""
     seedg = create_seed_generator(seed)

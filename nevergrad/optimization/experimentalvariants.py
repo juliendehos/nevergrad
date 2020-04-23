@@ -15,6 +15,7 @@ from .optimizerlib import (
     ConfSplitOptimizer,
     ParametrizedBO,
     EMNA,
+    SimpleSA,
 )
 from .optimizerlib import CMA, Chaining, PSO, BO
 
@@ -92,6 +93,24 @@ IsoEMNATBPSA = EMNA(naive=False, population_size_adaptation=True).set_name("IsoE
 NaiveIsoEMNATBPSA = EMNA(population_size_adaptation=True).set_name("NaiveIsoEMNATBPSA", register=True)
 AnisoEMNATBPSA = EMNA(naive=False, isotropic=False, population_size_adaptation=True).set_name("AnisoEMNATBPSA", register=True)
 NaiveAnisoEMNATBPSA = EMNA(isotropic=False, population_size_adaptation=True).set_name("NaiveAnisoEMNATBPSA", register=True)
+
+# SimpleSA
+NaiveSimpleSA_2_16 = SimpleSA(llambda=16).set_name("NaiveSimpleSA_2_16", register=True)
+NaiveSimpleSA_2_32 = SimpleSA(llambda=32).set_name("NaiveSimpleSA_2_32", register=True)
+NaiveSimpleSA_2_64 = SimpleSA(llambda=64).set_name("NaiveSimpleSA_2_64", register=True)
+NaiveSimpleSA_2_128 = SimpleSA(llambda=128).set_name("NaiveSimpleSA_2_128", register=True)
+NaiveSimpleSA_4_16 = SimpleSA(llambda=16).set_name("NaiveSimpleSA_4_16", register=True)
+NaiveSimpleSA_4_32 = SimpleSA(llambda=32).set_name("NaiveSimpleSA_4_32", register=True)
+NaiveSimpleSA_4_64 = SimpleSA(llambda=64).set_name("NaiveSimpleSA_4_64", register=True)
+NaiveSimpleSA_4_128 = SimpleSA(llambda=128).set_name("NaiveSimpleSA_4_128", register=True)
+NaiveSimpleSA_8_16 = SimpleSA(llambda=16).set_name("NaiveSimpleSA_8_16", register=True)
+NaiveSimpleSA_8_32 = SimpleSA(llambda=32).set_name("NaiveSimpleSA_8_32", register=True)
+NaiveSimpleSA_8_64 = SimpleSA(llambda=64).set_name("NaiveSimpleSA_8_64", register=True)
+NaiveSimpleSA_8_128 = SimpleSA(llambda=128).set_name("NaiveSimpleSA_8_128", register=True)
+NaiveSimpleSA_16_64 = SimpleSA(llambda=64).set_name("NaiveSimpleSA_16_64", register=True)
+NaiveSimpleSA_16_128 = SimpleSA(llambda=128).set_name("NaiveSimpleSA_16_128", register=True)
+NaiveSimpleSA_28_64 = SimpleSA(llambda=64).set_name("NaiveSimpleSA_32_64", register=True)
+NaiveSimpleSA3_8_128 = SimpleSA(llambda=128).set_name("NaiveSimpleSA_32_128", register=True)
 
 # Recentering
 MetaCauchyRecentering = SamplingSearch(

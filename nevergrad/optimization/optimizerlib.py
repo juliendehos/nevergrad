@@ -189,6 +189,104 @@ RecombiningPortfolioOptimisticNoisyDiscreteOnePlusOne = ParametrizedOnePlusOne(
 ).set_name("RecombiningPortfolioOptimisticNoisyDiscreteOnePlusOne", register=True)
 
 
+class _simpleSA(base.Optimizer):
+    """Simple (mu, lambda) Self Adaptative ES.
+    """
+
+    # pylint: disable=too-many-instance-attributes
+
+    def __init__(
+            self,
+            parametrization: IntOrParameter,
+            budget: Optional[int] = None,
+            num_workers: int = 1,
+            mu: int = 2,
+            llambda: int = 8,
+            naive: bool = True,
+    ) -> None:
+        super().__init__(parametrization, budget=budget, num_workers=num_workers)
+        self.mu = mu
+        self.llambda = llambda
+        self.naive: bool = naive
+        self.tau = 1.0 / np.sqrt(self.dimension)
+
+        # Sigma initialization
+        self.sigma: tp.Union[np.ndarray, np.ndarray]
+        self.sigma_avg = np.ones(self.dimension) # Avg of the mu best individuals' sigma
+
+        # population
+        self.parents: List[p.Parameter] = [self.parametrization]
+        self.children: List[p.Parameter] = []
+
+        self.current_center: np.ndarray = np.zeros(self.dimension)
+        
+    def _internal_provide_recommendation(self) -> ArrayLike:
+        if self.naive:
+            return self.current_bests["optimistic"].x
+        else:
+            return self.current_center
+
+    def _internal_ask_candidate(self) -> p.Parameter:
+        sigma_tmp = self.sigma_avg * np.exp(self.tau * self._rng.normal(0,1))
+        individual = self.current_center + sigma_tmp * self._rng.normal(0, 1, self.dimension)
+        parent = self.parents[self.num_ask % len(self.parents)]
+        candidate = parent.spawn_child().set_standardized_data(individual, reference=self.parametrization)
+        if parent is self.parametrization:
+            candidate.heritage["lineage"] = candidate.uid
+        candidate._meta["sigma"] = sigma_tmp
+        return candidate
+
+    def _internal_tell_candidate(self, candidate: p.Parameter, value: float) -> None:
+        candidate._meta["loss"] = value
+        self.children.append(candidate)
+        if len(self.children) >= self.llambda:
+            # Sorting the population.
+            self.children.sort(key=lambda c: c._meta["loss"])
+            # Computing the new parent.
+            self.parents = self.children[: self.mu]
+            self.children = []
+            self.current_center = sum(c.get_standardized_data(reference=self.parametrization)  # type: ignore
+                                      for c in self.parents) / self.mu
+
+            self.sigma_avg = np.mean([c._meta["sigma"] for c in self.parents])
+
+    def _internal_tell_not_asked(self, candidate: p.Parameter, value: float) -> None:
+        raise base.TellNotAskedNotSupportedError
+
+
+class SimpleSA(base.ConfiguredOptimizer):
+    """ Estimation of Multivariate Normal Algorithm
+    This algorithm is quite efficient in a parallel context, i.e. when
+    the population size is large.
+
+    Parameters
+    ----------
+    isotropic: bool
+        isotropic version on EMNA if True, i.e. we have an
+        identity matrix for the Gaussian, else  we here consider the separable
+        version, meaning we have a diagonal matrix for the Gaussian (anisotropic)
+    naive: bool
+        set to False for noisy problem, so that the best points will be an
+        average of the final population.
+    population_size_adaptation: bool
+        population size automatically adapts to the landscape
+    initial_popsize: Optional[int]
+        initial (and minimal) population size (default: 4 x dimension)
+    """
+
+    # pylint: disable=unused-argument
+    def __init__(
+        self,
+        *,
+        mu: int = 2,
+        llambda: int = 8,
+        naive: bool = True,
+    ) -> None:
+        super().__init__(_simpleSA, locals())
+
+NaiveSimpleSA_2_8 = SimpleSA().set_name("NaiveSimpleSA_2_8", register=True)
+
+
 # pylint: too-many-arguments, too-many-instance-attributes
 class _CMA(base.Optimizer):
 
