@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.neural_network import MLPRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+from sklearn import preprocessing
 import torch
 from torch.autograd import Variable
 import torch.nn.functional as F
@@ -13,6 +14,9 @@ from torch.utils.data import Dataset, DataLoader
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import optim
+
+min_max_scaler = preprocessing.MinMaxScaler()
+
 
 def keepBest(data):
     alldata = np.unique(data[['dimension', 'budget', 'lambda']], axis=0)
@@ -29,6 +33,9 @@ def keepBest(data):
         cleaned_data = cleaned_data.append(themin)
     del(cleaned_data['loss'])
     cleaned_data = cleaned_data.astype(dtype=float)
+    x = cleaned_data.values #returns a numpy array
+    x_scaled = min_max_scaler.fit_transform(x)
+    cleaned_data = pd.DataFrame(x_scaled, columns=['dimension', 'budget', 'lambda', 'mu'])
     print(cleaned_data.shape)
     return cleaned_data
 
@@ -71,15 +78,23 @@ class Model(nn.Module):
         super().__init__()
         self.inputSize = 3
         self.outputSize = 1
-        self.hiddenSize = 100
+        self.hiddenSize1 = 600
+        self.hiddenSize2 = 10
         
-        self.hidden = nn.Linear(self.inputSize, self.hiddenSize)
-        self.output = nn.Linear(self.hiddenSize, self.outputSize)
+        self.classifier = nn.Sequential(
+            nn.Linear(self.inputSize, self.hiddenSize1),
+            # nn.BatchNorm1d(self.hiddenSize1),
+            nn.Dropout(0.3),
+            nn.ReLU(),
+            nn.Linear(self.hiddenSize1, self.hiddenSize2),
+            # nn.BatchNorm1d(self.hiddenSize2),
+            nn.Dropout(0.3),
+            nn.ReLU(),
+            nn.Linear(self.hiddenSize2, self.outputSize)
+        )
         
     def forward(self, x):
-        x = self.hidden(x)
-        x = torch.sigmoid(x)
-        x = self.output(x)
+        x = self.classifier(x)
         return x
                
 
@@ -87,23 +102,24 @@ def main():
     data = pd.read_csv('data.csv', sep=',')
     cleaned_data = keepBest(data)
     # analyze(cleaned_data)
-    x_train, y_train, x_test, y_test = splitData(cleaned_data, 0.1)
+    x_train, y_train, x_test, y_test = splitData(cleaned_data, 0.2)
     print(x_train.shape)
     print(x_test.shape)
 
     model = Model()
     loss_function = nn.MSELoss()
-    optimizer = optim.SGD(model.parameters(), lr=0.01, weight_decay= 1e-6, momentum = 0.9, nesterov = True)
-
+    optimizer = optim.Adam(model.parameters())
+    # optimizer = optim.RMSprop(model.parameters())
+    # optimizer = optim.SGD(model.parameters(), lr=0.01, weight_decay= 1e-6, momentum = 0.9, nesterov = True)
 
 
     data_train = torch.utils.data.TensorDataset(torch.Tensor(np.array(x_train)), torch.Tensor(np.array(y_train)))
-    train_loader = torch.utils.data.DataLoader(data_train, batch_size = 16, shuffle = True)
+    train_loader = torch.utils.data.DataLoader(data_train, batch_size = 64, shuffle = True)
 
     data_test = torch.utils.data.TensorDataset(torch.Tensor(np.array(x_test)), torch.Tensor(np.array(y_test)))
     test_loader = torch.utils.data.DataLoader(data_test)
 
-    for epoch in range(1, 1001): ## run the model for 10 epochs
+    for epoch in range(1, 10001): ## run the model for 10 epochs
         train_loss, valid_loss = [], []
 
         ## training part 
@@ -113,13 +129,10 @@ def main():
 
             ## 1. forward propagation
             output = model(data)
-
             ## 2. loss calculation
             loss = loss_function(output, target.view(-1,1))
-
             ## 3. backward propagation
             loss.backward()
-
             ## 4. weight optimization
             optimizer.step()
 
@@ -131,9 +144,17 @@ def main():
             output = model(data)
             loss = loss_function(output, target.view(-1,1))
             valid_loss.append(loss.item())
-            print ("Epoch:", epoch, "Training Loss: ", np.mean(train_loss), "Valid Loss: ", np.mean(valid_loss))
 
-    print ("Epoch:", epoch, "Training Loss: ", np.mean(train_loss), "Valid Loss: ", np.mean(valid_loss))
+        print ("Epoch:", epoch, "Training Loss: ", np.mean(train_loss), "Valid Loss: ", np.mean(valid_loss))
+    model.eval()
+    for data, target in test_loader:
+        pred = model(data)
+        pred2 = pred.detach().numpy()
+        target2 = target.detach().numpy()
+        pred2 = min_max_scaler.inverse_transform(pred2)
+        target2 = min_max_scaler.inverse_transform(target2)
+        print(pred2)
+        print(target2)
 
 
 if __name__ == '__main__':
