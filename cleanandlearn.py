@@ -87,10 +87,15 @@ def main():
     data = pd.read_csv('data.csv', sep=',')
     cleaned_data = keepBest(data)
     # analyze(cleaned_data)
+    x_train, y_train, x_test, y_test = splitData(cleaned_data, 0.1)
+    print(x_train.shape)
+    print(x_test.shape)
 
     model = Model()
     loss_function = nn.MSELoss()
     optimizer = optim.SGD(model.parameters(), lr=0.01, weight_decay= 1e-6, momentum = 0.9, nesterov = True)
+
+
 
     data_train = torch.utils.data.TensorDataset(torch.Tensor(np.array(x_train)), torch.Tensor(np.array(y_train)))
     train_loader = torch.utils.data.DataLoader(data_train, batch_size = 16, shuffle = True)
