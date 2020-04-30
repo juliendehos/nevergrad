@@ -34,8 +34,7 @@ def keepBest(data):
     del(cleaned_data['loss'])
     cleaned_data = cleaned_data.astype(dtype=float)
     x = cleaned_data.values #returns a numpy array
-    x_scaled = min_max_scaler.fit_transform(x)
-    cleaned_data = pd.DataFrame(x_scaled, columns=['dimension', 'budget', 'lambda', 'mu'])
+    x_scaled = min_max_scaler.fit(x)
     print(cleaned_data.shape)
     return cleaned_data
 
@@ -51,9 +50,13 @@ def splitData(data, test_ratio):
     train, test = train_test_split(data, test_size=test_ratio)
     x_train = train
     y_train = train['mu']
+    x_scaled = min_max_scaler.transform(x_train)
+    x_train = pd.DataFrame(x_scaled, columns=['dimension', 'budget', 'lambda', 'mu'])
     del(train['mu'])
     x_test = test
     y_test = test['mu']
+    x_scaled = min_max_scaler.transform(x_test)
+    x_test = pd.DataFrame(x_scaled, columns=['dimension', 'budget', 'lambda', 'mu'])
     del(test['mu'])
     return x_train, y_train, x_test, y_test
 
