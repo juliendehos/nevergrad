@@ -52,12 +52,12 @@ def splitData(data, test_ratio):
     y_train = train['mu']
     x_scaled = min_max_scaler.transform(x_train)
     x_train = pd.DataFrame(x_scaled, columns=['dimension', 'budget', 'lambda', 'mu'])
-    del(train['mu'])
+    del(x_train['mu'])
     x_test = test
     y_test = test['mu']
     x_scaled = min_max_scaler.transform(x_test)
     x_test = pd.DataFrame(x_scaled, columns=['dimension', 'budget', 'lambda', 'mu'])
-    del(test['mu'])
+    del(x_test['mu'])
     return x_train, y_train, x_test, y_test
 
 
@@ -154,8 +154,8 @@ def main():
         pred = model(data)
         pred2 = pred.detach().numpy()
         target2 = target.detach().numpy()
-        pred2 = min_max_scaler.inverse_transform(pred2)
-        target2 = min_max_scaler.inverse_transform(target2)
+        # pred2 = min_max_scaler.inverse_transform(pred2)
+        # target2 = min_max_scaler.inverse_transform(target2)
         print(pred2)
         print(target2)
 
