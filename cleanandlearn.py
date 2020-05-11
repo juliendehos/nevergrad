@@ -36,6 +36,7 @@ def keepBest(data):
     x = cleaned_data.values #returns a numpy array
     x_scaled = min_max_scaler.fit(x)
     print(cleaned_data.shape)
+    print(cleaned_data)
     return cleaned_data
 
 def analyze(data):
@@ -81,8 +82,10 @@ class Model(nn.Module):
         super().__init__()
         self.inputSize = 3
         self.outputSize = 1
-        self.hiddenSize1 = 600
-        self.hiddenSize2 = 10
+        self.hiddenSize1 = 30
+        self.hiddenSize2 = 80
+        self.hiddenSize3 = 20
+        self.hiddenSize4 = 5
         
         self.classifier = nn.Sequential(
             nn.Linear(self.inputSize, self.hiddenSize1),
@@ -93,7 +96,13 @@ class Model(nn.Module):
             # nn.BatchNorm1d(self.hiddenSize2),
             nn.Dropout(0.3),
             nn.ReLU(),
-            nn.Linear(self.hiddenSize2, self.outputSize)
+            nn.Linear(self.hiddenSize2, self.hiddenSize3),
+            nn.Dropout(0.3),
+            nn.ReLU(),
+            nn.Linear(self.hiddenSize3, self.hiddenSize4),
+            nn.Dropout(0.3),
+            nn.ReLU(),
+            nn.Linear(self.hiddenSize4, self.outputSize)
         )
         
     def forward(self, x):
@@ -108,7 +117,7 @@ def main():
     x_train, y_train, x_test, y_test = splitData(cleaned_data, 0.2)
     print(x_train.shape)
     print(x_test.shape)
-
+    return
     model = Model()
     loss_function = nn.MSELoss()
     optimizer = optim.Adam(model.parameters())
